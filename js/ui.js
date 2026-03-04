@@ -8,6 +8,7 @@ let _searchQuery = '';
 let _splitView   = true;        // side-by-side Request | Response (default)
 let _splitRightTab = 'response'; // 'response' | 'headers' | 'notes'
 let _jsonViewMode = 'response'; // 'hidden' | 'request' | 'response'
+let _projectMode = false;       // collection project details panel
 
 // ── Master render ─────────────────────────────────────────────────
 
@@ -115,6 +116,7 @@ function buildEntryItem(colId, entryId, entry) {
   item.addEventListener('click', () => {
     DATA.currentCollection = colId;
     DATA.currentEntry = entryId;
+    _projectMode = false;
     DATA.expandedCols[colId] = true;
     jv_save();
     render();
@@ -158,6 +160,7 @@ function renderSearchResults(body) {
     item.addEventListener('click', () => {
       DATA.currentCollection = r.colId;
       DATA.currentEntry = r.entryId;
+      _projectMode = false;
       DATA.expandedCols[r.colId] = true;
       jv_save();
       render();
@@ -223,9 +226,23 @@ function buildEntryView(colId, entryId, entry) {
   const baseUrl  = col.baseUrl || '';
   const endpoint = entry.endpoint || '';
   const isFullUrl = endpoint.startsWith('http://') || endpoint.startsWith('https://');
-  const urlHost   = isFullUrl ? '' : baseUrl;
-  const urlPath   = isFullUrl ? endpoint : endpoint;
-  const hasUrl    = urlHost || urlPath;
+  let hostLabel = '';
+  let pathLabel = '';
+  if (isFullUrl) {
+    try {
+      const u = new URL(endpoint);
+      hostLabel = u.origin;
+      pathLabel = (u.pathname || '/') + (u.search || '');
+    } catch (e) {
+      hostLabel = '';
+      pathLabel = endpoint;
+    }
+  } else {
+    hostLabel = baseUrl;
+    pathLabel = endpoint || (baseUrl ? '/' : '');
+  }
+  const hostBadge = hostLabel ? hostLabel.replace(/^https?:\/\//, '') : 'NO HOST';
+  const hasUrl = hostLabel || pathLabel;
 
   hdr.innerHTML = `
     <div class="ev-breadcrumb">
@@ -235,14 +252,20 @@ function buildEntryView(colId, entryId, entry) {
     </div>
 
     <div class="ev-url-row">
-      <div class="url-bar">
-        <div class="url-method-wrap" style="--mc:${color}">
-          <span class="url-method">${entry.method}</span>
+      <div class="url-stack">
+        <div class="url-host-row" style="--mc:${color}">
+          <span class="url-host-label">HOST</span>
+          <span class="url-host-chip">${esc(hostBadge)}</span>
         </div>
-        <div class="url-text">
-          ${hasUrl
-            ? `${urlHost ? `<span class="url-host">${esc(urlHost)}</span>` : ''}<span class="url-path">${esc(urlPath)}</span>`
-            : `<span class="url-empty">no endpoint — click Edit to add one</span>`}
+        <div class="url-bar">
+          <div class="url-method-wrap" style="--mc:${color}">
+            <span class="url-method">${entry.method}</span>
+          </div>
+          <div class="url-text">
+            ${hasUrl
+              ? `<span class="url-path">${esc(pathLabel)}</span>`
+              : `<span class="url-empty">no endpoint - click Edit to add one</span>`}
+          </div>
         </div>
       </div>
       <div class="ev-actions">
@@ -281,17 +304,19 @@ function buildEntryView(colId, entryId, entry) {
     for (const mode of modes) {
       const btn = document.createElement('button');
       const isActive = mode.id === 'split'
-        ? _splitView
-        : (!_splitView && _jsonViewMode === mode.id);
+        ? (!_projectMode && _splitView)
+        : (!_projectMode && !_splitView && _jsonViewMode === mode.id);
       btn.className = 'btn-depth' + (isActive ? ' active' : '');
       btn.title = mode.title;
       btn.innerHTML = viewModeIconSvg(mode.id);
       btn.addEventListener('click', () => {
         if (mode.id === 'split') {
+          _projectMode = false;
           _splitView = !_splitView;
           renderMainPanel();
           return;
         }
+        _projectMode = false;
         _jsonViewMode = mode.id;
         if (_splitView) _splitView = false;
         renderMainPanel();
@@ -299,6 +324,28 @@ function buildEntryView(colId, entryId, entry) {
       viewGroup.appendChild(btn);
     }
     breadcrumb.appendChild(viewGroup);
+  }
+
+  const crumbCol = hdr.querySelector('.ev-crumb-col');
+  if (crumbCol) {
+    crumbCol.classList.add('is-clickable');
+    crumbCol.title = 'Show project details';
+    crumbCol.addEventListener('click', () => {
+      _projectMode = true;
+      _splitView = false;
+      renderMainPanel();
+    });
+  }
+  const crumbEntry = hdr.querySelector('.ev-crumb-entry');
+  if (crumbEntry) {
+    crumbEntry.classList.add('is-clickable');
+    crumbEntry.title = 'Back to entry JSON view';
+    crumbEntry.addEventListener('click', () => {
+      if (_projectMode) {
+        _projectMode = false;
+        renderMainPanel();
+      }
+    });
   }
 
   view.appendChild(hdr);
@@ -333,7 +380,9 @@ function buildEntryView(colId, entryId, entry) {
   const content = document.createElement('div');
   content.className = 'ev-content';
 
-  if (_splitView) {
+  if (_projectMode) {
+    content.appendChild(buildProjectPanel(col, entry));
+  } else if (_splitView) {
     content.appendChild(buildSplitView(entry, hasReq, colId, entryId));
   } else if (_jsonViewMode === 'hidden') {
     content.innerHTML = '<div class="content-empty">JSON hidden. Select Request or Response to view data.</div>';
@@ -354,6 +403,10 @@ function buildEntryView(colId, entryId, entry) {
     if (_splitView && _splitRightTab === 'notes') {
       copyToClipboard(entry.notes || '');
       showToast('Notes copied!', 'success');
+      return;
+    }
+    if (_projectMode) {
+      showToast('Project view has no JSON to copy', 'error');
       return;
     }
     if (!_splitView && _jsonViewMode === 'hidden') {
@@ -428,6 +481,51 @@ function buildJsonViewer(jsonData, filename, badge = null) {
 }
 
 // ── Split View Builder ────────────────────────────────────────────
+
+function formatProjectCredentials(credentials) {
+  if (credentials === null || credentials === undefined) return 'Not configured';
+  if (typeof credentials === 'string') return credentials.trim() || 'Not configured';
+  try {
+    return JSON.stringify(credentials, null, 2);
+  } catch (e) {
+    return String(credentials);
+  }
+}
+
+function buildProjectPanel(col, entry) {
+  const panel = document.createElement('div');
+  panel.className = 'project-panel';
+
+  const host = (col.baseUrl || '').trim() || 'Not configured';
+  const shortDesc = (col.shortDescription || col.description || '').trim() || 'No short description configured.';
+  const credentials = formatProjectCredentials(col.credentials);
+
+  panel.innerHTML = `
+    <div class="project-head">
+      <span class="project-title">Project Details</span>
+      <button class="btn-ghost-sm" id="btn-project-edit">Edit</button>
+    </div>
+    <div class="project-grid">
+      <div class="project-item">
+        <span class="project-label">Host</span>
+        <pre class="project-value">${esc(host)}</pre>
+      </div>
+      <div class="project-item">
+        <span class="project-label">Short Description</span>
+        <pre class="project-value">${esc(shortDesc)}</pre>
+      </div>
+      <div class="project-item">
+        <span class="project-label">Credentials</span>
+        <pre class="project-value">${esc(credentials)}</pre>
+      </div>
+    </div>`;
+
+  panel.querySelector('#btn-project-edit')?.addEventListener('click', () => {
+    openCollectionModal(col.id);
+  });
+
+  return panel;
+}
 
 function buildSplitView(entry, hasReq, colId, entryId) {
   const layout = document.createElement('div');
@@ -770,6 +868,18 @@ function openCollectionModal(colId = null) {
           placeholder="https://werkbon.voskampgroep.nl:12350"
           spellcheck="false" autocomplete="off">
       </div>
+      ${col ? `
+      <div class="form-row">
+        <label>Short Description <span style="color:var(--text-3)">(project summary)</span></label>
+        <input class="field" id="col-short-desc" type="text"
+          value="${esc(col?.shortDescription || '')}"
+          placeholder="Short summary for this project">
+      </div>
+      <div class="form-row">
+        <label>Credentials <span style="color:var(--text-3)">(project-level notes or JSON)</span></label>
+        <textarea class="field" id="col-credentials" rows="4" placeholder='{"Authorization":"Bearer ..."}'>${esc(typeof col?.credentials === 'string' ? col.credentials : JSON.stringify(col?.credentials || '', null, 2))}</textarea>
+      </div>
+      ` : ''}
     </div>
     <div class="modal-foot">
       <button class="btn-ghost" onclick="closeModal()">Cancel</button>
@@ -782,12 +892,29 @@ function openCollectionModal(colId = null) {
 function saveCollectionModal(colId) {
   const name = document.getElementById('col-name').value.trim();
   if (!name) { document.getElementById('col-name').focus(); return; }
-  const baseUrl     = document.getElementById('col-baseurl').value.trim();
+  const baseUrl = document.getElementById('col-baseurl').value.trim();
+  const shortEl = document.getElementById('col-short-desc');
+  const credEl = document.getElementById('col-credentials');
+  const updates = { name, baseUrl };
+
+  if (shortEl) updates.shortDescription = shortEl.value.trim();
+  if (credEl) {
+    const raw = credEl.value.trim();
+    if (!raw) {
+      updates.credentials = '';
+    } else {
+      try {
+        updates.credentials = JSON.parse(raw);
+      } catch (e) {
+        updates.credentials = raw;
+      }
+    }
+  }
 
   if (colId) {
-    col_update(colId, { name, baseUrl });
+    col_update(colId, updates);
   } else {
-    col_create({ name, baseUrl });
+    col_create(updates);
   }
   closeModal();
   render();
@@ -821,7 +948,7 @@ function openEntryModal(colId, entryId = null) {
         </div>
         <div class="form-row">
           <label>Endpoint</label>
-          <input class="field" id="entry-endpoint" type="text" value="${esc(entry?.endpoint || '')}" placeholder="/api/v1/products">
+          <input class="field" id="entry-endpoint" type="text" value="${esc(entry?.endpoint || '')}" placeholder="https://api.example.com/v1/products or /api/v1/products">
         </div>
       </div>
       <div class="form-row">
@@ -931,6 +1058,7 @@ function saveEntryModal(colId, entryId) {
     entry_create(colId, payload);
     currentTab = 'response';
   }
+  _projectMode = false;
 
   closeModal();
   render();
@@ -1249,6 +1377,7 @@ function downloadFile(filename, content) {
 function slugify(str) {
   return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'collection';
 }
+
 
 
 
