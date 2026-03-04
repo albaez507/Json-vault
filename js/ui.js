@@ -241,8 +241,9 @@ function buildEntryView(colId, entryId, entry) {
     hostLabel = baseUrl;
     pathLabel = endpoint || (baseUrl ? '/' : '');
   }
-  const hostBadge = hostLabel ? hostLabel.replace(/^https?:\/\//, '') : 'NO HOST';
-  const hasUrl = hostLabel || pathLabel;
+  const hostBadge = hostLabel ? hostLabel.replace(/^https?:\/\//, '') : '';
+  const hasHost = Boolean(hostBadge);
+  const hasPath = Boolean(pathLabel);
 
   hdr.innerHTML = `
     <div class="ev-breadcrumb">
@@ -251,9 +252,9 @@ function buildEntryView(colId, entryId, entry) {
       <span class="ev-crumb-entry">${esc(entry.name)}</span>
     </div>
 
-    <div class="ev-url-row">
-      <div class="url-stack">
-        <div class="url-host-row" style="--mc:${color}">
+    <div class="ev-url-row${hasHost ? '' : ' no-url'}">
+      ${hasHost ? `<div class="url-stack">
+        <div class="url-host-row">
           <span class="url-host-label">HOST</span>
           <span class="url-host-chip">${esc(hostBadge)}</span>
         </div>
@@ -262,30 +263,21 @@ function buildEntryView(colId, entryId, entry) {
             <span class="url-method">${entry.method}</span>
           </div>
           <div class="url-text">
-            ${hasUrl
+            ${hasPath
               ? `<span class="url-path">${esc(pathLabel)}</span>`
               : `<span class="url-empty">no endpoint - click Edit to add one</span>`}
           </div>
         </div>
-      </div>
-      <div class="ev-actions">
-        <button class="btn-action" id="ev-btn-copy" title="Copy active JSON">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
-          Copy
-        </button>
-        <button class="btn-action" id="ev-btn-compare">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-          Compare
-        </button>
-        <button class="btn-action" id="ev-btn-edit">Edit</button>
-        <button class="btn-action btn-danger" id="ev-btn-delete">Delete</button>
-      </div>
+      </div>` : ''}
     </div>
 
     <div class="ev-meta-row">
       <span class="ev-entry-name">${esc(entry.name)}</span>
       ${entry.description ? `<span class="ev-desc">— ${esc(entry.description)}</span>` : ''}
-      <span class="ev-updated">Updated ${timeAgo(entry.updatedAt)}</span>
+      <button class="btn-action ev-compare-action" id="ev-btn-compare">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+        Compare
+      </button>      <span class="ev-updated">Updated ${timeAgo(entry.updatedAt)}</span>
     </div>
 
     <div class="ev-tags-row">${tagsHtml || '<span class="no-tags">no tags</span>'}</div>`;
@@ -399,47 +391,11 @@ function buildEntryView(colId, entryId, entry) {
   view.appendChild(content);
 
   // ── Button handlers ──
-  view.querySelector('#ev-btn-copy').addEventListener('click', () => {
-    if (_splitView && _splitRightTab === 'notes') {
-      copyToClipboard(entry.notes || '');
-      showToast('Notes copied!', 'success');
-      return;
-    }
-    if (_projectMode) {
-      showToast('Project view has no JSON to copy', 'error');
-      return;
-    }
-    if (!_splitView && _jsonViewMode === 'hidden') {
-      showToast('No JSON is visible to copy', 'error');
-      return;
-    }
-    if (!_splitView && _jsonViewMode === 'request' && !hasReq) {
-      showToast('No request JSON stored', 'error');
-      return;
-    }
-    const json = _splitView
-      ? (_splitRightTab === 'headers' ? (entry.headers || {}) : entry.responseJson)
-      : _jsonViewMode === 'request'
-        ? entry.requestJson
-        : entry.responseJson;
-    copyToClipboard(JSON.stringify(json, null, 2));
-    showToast('JSON copied!', 'success');
-  });
-
-  view.querySelector('#ev-btn-compare').addEventListener('click', () => {
+  // Compare button moved to metadata row
+  view.querySelector('#ev-btn-compare')?.addEventListener('click', () => {
     openCompareModal(colId, entryId);
   });
 
-  view.querySelector('#ev-btn-edit').addEventListener('click', () => {
-    openEntryModal(colId, entryId);
-  });
-
-  view.querySelector('#ev-btn-delete').addEventListener('click', () => {
-    openConfirmDelete(
-      `Delete "${entry.name}"? This cannot be undone.`,
-      () => { entry_delete(colId, entryId); render(); showToast('Entry deleted'); }
-    );
-  });
 
   return view;
 }
@@ -503,7 +459,10 @@ function buildProjectPanel(col, entry) {
   panel.innerHTML = `
     <div class="project-head">
       <span class="project-title">Project Details</span>
-      <button class="btn-ghost-sm" id="btn-project-edit">Edit</button>
+      <div class="project-head-actions">
+        ${entry ? `<button class="btn-ghost-sm" id="btn-entry-edit">Edit Entry</button>` : ''}
+        <button class="btn-ghost-sm" id="btn-project-edit">Edit Project</button>
+      </div>
     </div>
     <div class="project-grid">
       <div class="project-item">
@@ -522,6 +481,9 @@ function buildProjectPanel(col, entry) {
 
   panel.querySelector('#btn-project-edit')?.addEventListener('click', () => {
     openCollectionModal(col.id);
+  });
+  panel.querySelector('#btn-entry-edit')?.addEventListener('click', () => {
+    openEntryModal(col.id, entry.id);
   });
 
   return panel;
@@ -991,6 +953,7 @@ function saveEntryModal(colId, entryId) {
   const name       = document.getElementById('entry-name').value.trim();
   const method     = document.getElementById('entry-method').value;
   const endpoint   = document.getElementById('entry-endpoint').value.trim();
+  const description = document.getElementById('entry-desc').value.trim();
   const tagsRaw    = document.getElementById('entry-tags').value.trim();
   const resRaw     = document.getElementById('entry-res-json').value.trim();
   const reqRaw     = document.getElementById('entry-req-json').value.trim();
@@ -1377,6 +1340,8 @@ function downloadFile(filename, content) {
 function slugify(str) {
   return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'collection';
 }
+
+
 
 
 

@@ -481,6 +481,10 @@ body {
   padding: 6px 16px 10px;
 }
 
+.ev-url-row.no-url {
+  display: none;
+}
+
 .url-stack {
   flex: 1;
   min-width: 0;
@@ -489,14 +493,22 @@ body {
 .url-host-row {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   margin-bottom: 6px;
 }
 
 .url-host-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  border-radius: var(--radius);
+  border: 1px solid color-mix(in srgb, var(--green) 28%, transparent);
+  background: color-mix(in srgb, var(--green) 8%, transparent);
   font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: .08em;
+  font-weight: 700;
+  font-size: 11px;
+  letter-spacing: .07em;
   text-transform: uppercase;
   color: var(--green);
 }
@@ -525,19 +537,15 @@ body {
 }
 
 .url-host-chip {
-  max-width: 320px;
+  max-width: 420px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .04em;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .02em;
   color: var(--green);
-  border: 1px solid color-mix(in srgb, var(--green) 30%, transparent);
-  background: color-mix(in srgb, var(--green) 10%, transparent);
-  border-radius: 3px;
-  padding: 3px 8px;
 }
 
 .url-method {
@@ -577,14 +585,6 @@ body {
   font-size: 11.5px;
 }
 
-/* Actions row */
-.ev-actions {
-  display: flex;
-  gap: 5px;
-  align-items: center;
-  flex-shrink: 0;
-}
-
 /* Entry meta: name + description + tags */
 .ev-meta-row {
   display: flex;
@@ -608,7 +608,13 @@ body {
 .ev-updated {
   font-size: 11px;
   color: var(--text-3);
+  margin-left: 0;
+}
+
+.ev-compare-action {
   margin-left: auto;
+  padding: 3px 8px;
+  font-size: 11px;
 }
 
 .ev-tags-row {
@@ -910,6 +916,12 @@ body {
   align-items: center;
   justify-content: space-between;
   margin-bottom: 12px;
+}
+
+.project-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .project-title {

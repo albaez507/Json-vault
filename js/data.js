@@ -1,17 +1,17 @@
-// ================================================================
-// JSON Vault – Data Layer
+﻿// ================================================================
+// JSON Vault â€“ Data Layer
 // All state lives in DATA. Persisted in localStorage.
 // ================================================================
 
 const DATA = {
-  collections: {},   // colId → collection object
+  collections: {},   // colId â†’ collection object
   colOrder: [],      // display order
-  expandedCols: {},  // colId → bool
+  expandedCols: {},  // colId â†’ bool
   currentCollection: null,
   currentEntry: null
 };
 
-// ── Persistence ──────────────────────────────────────────────────
+// â”€â”€ Persistence â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function jv_save() {
   try {
@@ -36,18 +36,28 @@ function jv_load() {
   for (const col of Object.values(DATA.collections)) {
     if (!col.entryOrder) col.entryOrder = Object.keys(col.entries || {});
     if (!col.entries)    col.entries    = {};
+    if (!('shortDescription' in col)) col.shortDescription = '';
+    if (!('credentials' in col)) col.credentials = '';
     for (const entry of Object.values(col.entries)) {
       if (!('headers' in entry)) entry.headers = null;
     }
   }
 }
 
-// ── Collection CRUD ──────────────────────────────────────────────
+// â”€â”€ Collection CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-function col_create({ name, icon = '📁', color = '#7c5af5', description = '', baseUrl = '' }) {
+function col_create({
+  name,
+  icon = 'ÐY"?',
+  color = '#7c5af5',
+  description = '',
+  baseUrl = '',
+  shortDescription = '',
+  credentials = ''
+}) {
   const id = 'col_' + Date.now();
   DATA.collections[id] = {
-    id, name, icon, color, description, baseUrl,
+    id, name, icon, color, description, baseUrl, shortDescription, credentials,
     entries: {},
     entryOrder: [],
     createdAt: Date.now()
@@ -85,7 +95,7 @@ function col_toggle(colId) {
   jv_save();
 }
 
-// ── Entry CRUD ───────────────────────────────────────────────────
+// â”€â”€ Entry CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function entry_create(colId, {
   name, description = '', endpoint = '', method = 'GET',
@@ -123,7 +133,7 @@ function entry_delete(colId, entryId) {
   jv_save();
 }
 
-// ── Selectors ────────────────────────────────────────────────────
+// â”€â”€ Selectors â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function entry_getCurrent() {
   if (!DATA.currentCollection || !DATA.currentEntry) return null;
@@ -154,7 +164,7 @@ function entries_search(query) {
   return results;
 }
 
-// ── Import / Export ──────────────────────────────────────────────
+// â”€â”€ Import / Export â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function export_collection(colId) {
   return JSON.stringify({
@@ -179,6 +189,8 @@ function import_data(jsonStr) {
     const col = { ...data.collection };
     const id = 'col_' + Date.now();
     col.id = id;
+    if (!('shortDescription' in col)) col.shortDescription = '';
+    if (!('credentials' in col)) col.credentials = '';
     if (!col.entryOrder) col.entryOrder = Object.keys(col.entries || {});
     for (const entry of Object.values(col.entries || {})) {
       if (!('headers' in entry)) entry.headers = null;
@@ -199,6 +211,8 @@ function import_data(jsonStr) {
       if (!col) continue;
       const id = 'col_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
       col.id = id;
+      if (!('shortDescription' in col)) col.shortDescription = '';
+      if (!('credentials' in col)) col.credentials = '';
       if (!col.entryOrder) col.entryOrder = Object.keys(col.entries || {});
       for (const entry of Object.values(col.entries || {})) {
         if (!('headers' in entry)) entry.headers = null;
@@ -216,7 +230,7 @@ function import_data(jsonStr) {
   throw new Error('Unrecognized import format');
 }
 
-// ── Diff Utility ─────────────────────────────────────────────────
+// â”€â”€ Diff Utility â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function json_diff(golden, actual, path = '') {
   const diffs = [];
@@ -264,3 +278,4 @@ function json_diff(golden, actual, path = '') {
 
   return diffs;
 }
+
