@@ -36,6 +36,9 @@ function jv_load() {
   for (const col of Object.values(DATA.collections)) {
     if (!col.entryOrder) col.entryOrder = Object.keys(col.entries || {});
     if (!col.entries)    col.entries    = {};
+    for (const entry of Object.values(col.entries)) {
+      if (!('headers' in entry)) entry.headers = null;
+    }
   }
 }
 
@@ -86,14 +89,14 @@ function col_toggle(colId) {
 
 function entry_create(colId, {
   name, description = '', endpoint = '', method = 'GET',
-  tags = [], requestJson = null, responseJson = {}, notes = ''
+  tags = [], requestJson = null, responseJson = {}, headers = null, notes = ''
 }) {
   const id = 'entry_' + Date.now();
   const col = DATA.collections[colId];
   if (!col.entryOrder) col.entryOrder = [];
   col.entries[id] = {
     id, name, description, endpoint, method, tags,
-    requestJson, responseJson, notes,
+    requestJson, responseJson, headers, notes,
     createdAt: Date.now(),
     updatedAt: Date.now()
   };
@@ -177,6 +180,9 @@ function import_data(jsonStr) {
     const id = 'col_' + Date.now();
     col.id = id;
     if (!col.entryOrder) col.entryOrder = Object.keys(col.entries || {});
+    for (const entry of Object.values(col.entries || {})) {
+      if (!('headers' in entry)) entry.headers = null;
+    }
     DATA.collections[id] = col;
     DATA.colOrder.push(id);
     DATA.expandedCols[id] = true;
@@ -194,6 +200,9 @@ function import_data(jsonStr) {
       const id = 'col_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
       col.id = id;
       if (!col.entryOrder) col.entryOrder = Object.keys(col.entries || {});
+      for (const entry of Object.values(col.entries || {})) {
+        if (!('headers' in entry)) entry.headers = null;
+      }
       DATA.collections[id] = col;
       DATA.colOrder.push(id);
       DATA.expandedCols[id] = true;

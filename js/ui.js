@@ -5,7 +5,9 @@
 
 let currentTab  = 'response';   // 'response' | 'request' | 'notes'
 let _searchQuery = '';
-let _splitView   = false;       // side-by-side Request | Response
+let _splitView   = true;        // side-by-side Request | Response (default)
+let _splitRightTab = 'response'; // 'response' | 'headers' | 'notes'
+let _jsonViewMode = 'response'; // 'hidden' | 'request' | 'response'
 
 // ── Master render ─────────────────────────────────────────────────
 
@@ -207,7 +209,6 @@ function buildEntryView(colId, entryId, entry) {
   const col = DATA.collections[colId];
   const color = methodColor(entry.method);
   const hasReq   = entry.requestJson  !== null && entry.requestJson  !== undefined;
-  const hasNotes = entry.notes && entry.notes.trim();
 
   const view = document.createElement('div');
   view.className = 'entry-view';
@@ -266,54 +267,49 @@ function buildEntryView(colId, entryId, entry) {
 
     <div class="ev-tags-row">${tagsHtml || '<span class="no-tags">no tags</span>'}</div>`;
 
+  // Top-left view mode icons: hide / request / response / split
+  const breadcrumb = hdr.querySelector('.ev-breadcrumb');
+  if (breadcrumb) {
+    const viewGroup = document.createElement('div');
+    viewGroup.className = 'json-depth-group json-view-group';
+    const modes = [
+      { id: 'hidden',   title: 'Hide request and response JSON' },
+      { id: 'request',  title: 'Show request JSON only' },
+      { id: 'response', title: 'Show response JSON only' },
+      { id: 'split',    title: _splitView ? 'Exit split view' : 'Split view: request + response' }
+    ];
+    for (const mode of modes) {
+      const btn = document.createElement('button');
+      const isActive = mode.id === 'split'
+        ? _splitView
+        : (!_splitView && _jsonViewMode === mode.id);
+      btn.className = 'btn-depth' + (isActive ? ' active' : '');
+      btn.title = mode.title;
+      btn.innerHTML = viewModeIconSvg(mode.id);
+      btn.addEventListener('click', () => {
+        if (mode.id === 'split') {
+          _splitView = !_splitView;
+          renderMainPanel();
+          return;
+        }
+        _jsonViewMode = mode.id;
+        if (_splitView) _splitView = false;
+        renderMainPanel();
+      });
+      viewGroup.appendChild(btn);
+    }
+    breadcrumb.appendChild(viewGroup);
+  }
+
   view.appendChild(hdr);
 
   // ── Tabs ──
   const tabBar = document.createElement('div');
   tabBar.className = 'ev-tabs';
-
-  const tabs = [
-    { id: 'response', label: 'Response JSON', disabled: false },
-    { id: 'request',  label: 'Request JSON',  disabled: !hasReq },
-    { id: 'notes',    label: 'Notes',         disabled: !hasNotes }
-  ];
-
-  for (const t of tabs) {
-    const btn = document.createElement('button');
-    // In split mode, Response/Request tabs are de-emphasized; clicking exits split
-    const splitBlocked = _splitView && (t.id === 'response' || t.id === 'request');
-    btn.className = 'ev-tab'
-      + (!_splitView && currentTab === t.id ? ' active' : '')
-      + (t.disabled ? ' disabled' : '')
-      + (splitBlocked ? ' split-blocked' : '');
-    btn.textContent = t.label;
-    if (!t.disabled) {
-      btn.addEventListener('click', () => {
-        if (_splitView) _splitView = false;   // exit split on any tab click
-        currentTab = t.id;
-        renderMainPanel();
-      });
-    }
-    tabBar.appendChild(btn);
-  }
+  tabBar.style.display = 'none';
 
   const tabActions = document.createElement('div');
   tabActions.className = 'ev-tab-actions';
-
-  if (currentTab !== 'notes' || _splitView) {
-    const expandBtn = document.createElement('button');
-    expandBtn.className = 'btn-ghost-sm';
-    expandBtn.textContent = 'Expand All';
-    expandBtn.addEventListener('click', () => expandAllNodes(view));
-    tabActions.appendChild(expandBtn);
-
-    const collapseBtn = document.createElement('button');
-    collapseBtn.className = 'btn-ghost-sm';
-    collapseBtn.textContent = 'Collapse All';
-    collapseBtn.addEventListener('click', () => collapseAllNodes(view));
-    tabActions.appendChild(collapseBtn);
-  }
-
   // ── Split view toggle ──
   const splitBtn = document.createElement('button');
   splitBtn.className = 'btn-split' + (_splitView ? ' active' : '');
@@ -339,24 +335,40 @@ function buildEntryView(colId, entryId, entry) {
 
   if (_splitView) {
     content.appendChild(buildSplitView(entry, hasReq, colId, entryId));
-  } else if (currentTab === 'response') {
-    content.appendChild(buildJsonViewer(entry.responseJson, 'response.json'));
-  } else if (currentTab === 'request' && hasReq) {
-    content.appendChild(buildJsonViewer(entry.requestJson, 'request.json'));
-  } else if (currentTab === 'notes' && hasNotes) {
-    const n = document.createElement('div');
-    n.className = 'notes-viewer';
-    n.textContent = entry.notes;
-    content.appendChild(n);
+  } else if (_jsonViewMode === 'hidden') {
+    content.innerHTML = '<div class="content-empty">JSON hidden. Select Request or Response to view data.</div>';
+  } else if (_jsonViewMode === 'request') {
+    if (hasReq) {
+      content.appendChild(buildJsonViewer(entry.requestJson, 'request.json'));
+    } else {
+      content.innerHTML = '<div class="content-empty">No request JSON stored for this entry.</div>';
+    }
   } else {
-    content.innerHTML = '<div class="content-empty">Nothing here yet. Edit this entry to add content.</div>';
+    content.appendChild(buildJsonViewer(entry.responseJson, 'response.json'));
   }
 
   view.appendChild(content);
 
   // ── Button handlers ──
   view.querySelector('#ev-btn-copy').addEventListener('click', () => {
-    const json = currentTab === 'request' ? entry.requestJson : entry.responseJson;
+    if (_splitView && _splitRightTab === 'notes') {
+      copyToClipboard(entry.notes || '');
+      showToast('Notes copied!', 'success');
+      return;
+    }
+    if (!_splitView && _jsonViewMode === 'hidden') {
+      showToast('No JSON is visible to copy', 'error');
+      return;
+    }
+    if (!_splitView && _jsonViewMode === 'request' && !hasReq) {
+      showToast('No request JSON stored', 'error');
+      return;
+    }
+    const json = _splitView
+      ? (_splitRightTab === 'headers' ? (entry.headers || {}) : entry.responseJson)
+      : _jsonViewMode === 'request'
+        ? entry.requestJson
+        : entry.responseJson;
     copyToClipboard(JSON.stringify(json, null, 2));
     showToast('JSON copied!', 'success');
   });
@@ -421,7 +433,7 @@ function buildSplitView(entry, hasReq, colId, entryId) {
   const layout = document.createElement('div');
   layout.className = 'ev-split-layout';
 
-  // ── Left panel: Request JSON ──
+  // Left panel: Request JSON
   const left = document.createElement('div');
   left.className = 'ev-split-panel';
 
@@ -448,7 +460,10 @@ function buildSplitView(entry, hasReq, colId, entryId) {
     left.appendChild(empty);
   }
 
-  // ── Divider (draggable) ──
+  // Right panel: RESPONSE | HEADERS | NOTES
+  const right = buildSplitRightPanel(entry);
+
+  // Divider (draggable)
   const divider = document.createElement('div');
   divider.className = 'ev-split-divider';
   divider.title = 'Drag to resize';
@@ -472,19 +487,95 @@ function buildSplitView(entry, hasReq, colId, entryId) {
     if (dragging) { dragging = false; document.body.style.cursor = ''; }
   });
 
-  // ── Right panel: Response JSON ──
-  const right = document.createElement('div');
-  right.className = 'ev-split-panel';
-  right.appendChild(buildJsonViewer(entry.responseJson, 'response.json', 'RESPONSE'));
-
   layout.appendChild(left);
   layout.appendChild(divider);
   layout.appendChild(right);
   return layout;
 }
 
-// ── JSON Tree Builder ─────────────────────────────────────────────
+function buildSplitRightPanel(entry) {
+  if (!['response', 'headers', 'notes'].includes(_splitRightTab)) {
+    _splitRightTab = 'response';
+  }
 
+  const hasHeaders = entry.headers && typeof entry.headers === 'object' && !Array.isArray(entry.headers) && Object.keys(entry.headers).length > 0;
+  const hasNotes = entry.notes && entry.notes.trim();
+
+  const right = document.createElement('div');
+  right.className = 'ev-split-panel';
+
+  const viewer = document.createElement('div');
+  viewer.className = 'json-viewer';
+
+  const toolbar = document.createElement('div');
+  toolbar.className = 'json-toolbar';
+
+  const modeSwitch = document.createElement('div');
+  modeSwitch.className = 'split-right-modes';
+  const modes = [
+    { id: 'response', label: 'RESPONSE' },
+    { id: 'headers',  label: 'HEADERS' },
+    { id: 'notes',    label: 'NOTES' }
+  ];
+
+  for (const mode of modes) {
+    const btn = document.createElement('button');
+    btn.className = 'split-right-mode' + (_splitRightTab === mode.id ? ' active' : '');
+    btn.textContent = mode.label;
+    btn.addEventListener('click', () => {
+      _splitRightTab = mode.id;
+      renderMainPanel();
+    });
+    modeSwitch.appendChild(btn);
+  }
+
+  toolbar.appendChild(modeSwitch);
+
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'btn-ghost-sm';
+  copyBtn.textContent = 'Copy';
+  copyBtn.addEventListener('click', () => {
+    if (_splitRightTab === 'notes') {
+      copyToClipboard(entry.notes || '');
+      showToast('Notes copied!', 'success');
+      return;
+    }
+    const json = _splitRightTab === 'headers' ? (entry.headers || {}) : entry.responseJson;
+    copyToClipboard(JSON.stringify(json, null, 2));
+    showToast('Copied!', 'success');
+  });
+  toolbar.appendChild(copyBtn);
+
+  viewer.appendChild(toolbar);
+
+  if (_splitRightTab === 'notes') {
+    const notes = document.createElement('div');
+    notes.className = 'notes-viewer';
+    notes.textContent = hasNotes ? entry.notes : 'No notes saved yet.';
+    viewer.appendChild(notes);
+  } else if (_splitRightTab === 'headers' && !hasHeaders) {
+    const empty = document.createElement('div');
+    empty.className = 'split-empty-panel';
+    empty.innerHTML = '<span>No headers saved yet. Click Edit to add request headers.</span>';
+    viewer.appendChild(empty);
+  } else {
+    const tree = document.createElement('div');
+    tree.className = 'json-tree';
+    const jsonData = _splitRightTab === 'headers' ? entry.headers : entry.responseJson;
+
+    if (jsonData === null || jsonData === undefined) {
+      tree.innerHTML = '<span class="j-null">null</span>';
+    } else {
+      tree.appendChild(buildJsonNode(jsonData, 0));
+    }
+    viewer.appendChild(tree);
+  }
+
+  right.appendChild(viewer);
+  return right;
+}
+
+// JSON Tree Builder
 function buildJsonNode(value, depth) {
   // Primitives
   if (value === null)                            return mkSpan('j-null',  'null');
@@ -585,34 +676,58 @@ function buildJsonNode(value, depth) {
   return wrap;
 }
 
-function expandAllNodes(root) {
-  root.querySelectorAll('.j-body').forEach(b => {
-    b.style.display = '';
-    const hdr = b.previousElementSibling;
-    if (hdr && hdr.classList.contains('j-hdr')) {
-      const toggle = hdr.querySelector('.j-toggle');
-      const preview = hdr.querySelector('.j-preview');
-      const cbC = hdr.querySelector('.j-punct.j-hidden');
-      if (toggle) toggle.textContent = '▾';
-      if (preview) preview.classList.add('j-hidden');
-    }
-  });
-  root.querySelectorAll('.j-close-row').forEach(r => r.style.display = '');
+function viewModeIconSvg(mode) {
+  if (mode === 'hidden') {
+    return '<svg viewBox="0 0 16 12" width="14" height="11" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><path d="M1.5 6c1.8-2.8 4-4.2 6.5-4.2S12.7 3.2 14.5 6c-1.8 2.8-4 4.2-6.5 4.2S3.3 8.8 1.5 6z"/><line x1="2" y1="10.5" x2="14" y2="1.5"/></svg>';
+  }
+  if (mode === 'request') {
+    return '<svg viewBox="0 0 16 12" width="14" height="11" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="1.5" y="1.5" width="5.5" height="9" rx="1"/><line x1="8.8" y1="6" x2="14.5" y2="6"/></svg>';
+  }
+  if (mode === 'split') {
+    return '<svg viewBox="0 0 16 12" width="14" height="11" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="1.5" y="1.5" width="5.5" height="9" rx="1"/><rect x="9" y="1.5" width="5.5" height="9" rx="1"/></svg>';
+  }
+  return '<svg viewBox="0 0 16 12" width="14" height="11" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><line x1="1.5" y1="6" x2="7.2" y2="6"/><rect x="9" y="1.5" width="5.5" height="9" rx="1"/></svg>';
 }
 
-function collapseAllNodes(root) {
-  root.querySelectorAll('.j-body').forEach(b => {
-    b.style.display = 'none';
-    const hdr = b.previousElementSibling;
-    if (hdr && hdr.classList.contains('j-hdr')) {
-      const toggle = hdr.querySelector('.j-toggle');
-      const preview = hdr.querySelector('.j-preview');
-      if (toggle) toggle.textContent = '▸';
-      if (preview) preview.classList.remove('j-hidden');
-    }
-  });
-  root.querySelectorAll('.j-close-row').forEach(r => r.style.display = 'none');
+function setJsonNodeExpanded(wrap, expanded) {
+  const hdr = wrap.querySelector(':scope > .j-hdr');
+  const body = wrap.querySelector(':scope > .j-body');
+  const closeRow = wrap.querySelector(':scope > .j-close-row');
+  if (!hdr || !body || !closeRow) return;
+
+  const toggle = hdr.querySelector('.j-toggle');
+  const preview = hdr.querySelector('.j-preview');
+  const cbCollapsed = hdr.lastElementChild;
+
+  body.style.display = expanded ? '' : 'none';
+  closeRow.style.display = expanded ? '' : 'none';
+  if (toggle) toggle.textContent = expanded ? '\u25BE' : '\u25B8';
+  if (preview) preview.classList.toggle('j-hidden', expanded);
+  if (cbCollapsed) cbCollapsed.classList.toggle('j-hidden', expanded);
 }
+
+function nodeDepth(wrap) {
+  let d = 0;
+  let p = wrap.parentElement;
+  while (p) {
+    if (p.classList && p.classList.contains('j-body')) d++;
+    p = p.parentElement;
+  }
+  return d;
+}
+
+function applyExpandLevel(root, level) {
+  if (!root) return;
+  const maxDepth = level === 99 ? Infinity : level - 1;
+  root.querySelectorAll('.j-collapsible').forEach(wrap => {
+    const expanded = nodeDepth(wrap) <= maxDepth;
+    setJsonNodeExpanded(wrap, expanded);
+  });
+}
+
+// Kept for compatibility with old calls.
+function expandAllNodes(root) { applyExpandLevel(root, 99); }
+function collapseAllNodes(root) { applyExpandLevel(root, 0); }
 
 // ── Modals ────────────────────────────────────────────────────────
 
@@ -633,15 +748,10 @@ function closeModal() {
 
 // ── Collection Modal ──────────────────────────────────────────────
 
-const COL_ICONS = ['📁', '🗂️', '⚡', '🔗', '🛒', '👤', '💳', '📦', '🔐', '🌐', '📊', '🧩', '🎯', '🔧', '🚀'];
 
 function openCollectionModal(colId = null) {
   const col = colId ? DATA.collections[colId] : null;
   const title = col ? 'Edit Collection' : 'New Collection';
-  const icon = col?.icon || '📁';
-  const iconsHtml = COL_ICONS.map(i =>
-    `<span class="icon-opt${i === icon ? ' selected' : ''}" data-icon="${i}" onclick="selectIcon(this)">${i}</span>`
-  ).join('');
 
   openModal(`
     <div class="modal-head">
@@ -660,14 +770,6 @@ function openCollectionModal(colId = null) {
           placeholder="https://werkbon.voskampgroep.nl:12350"
           spellcheck="false" autocomplete="off">
       </div>
-      <div class="form-row">
-        <label>Icon</label>
-        <div class="icon-picker" id="icon-picker">${iconsHtml}</div>
-      </div>
-      <div class="form-row">
-        <label>Description <span style="color:var(--text-3)">(optional)</span></label>
-        <textarea class="field" id="col-desc" rows="2" placeholder="What APIs does this collection cover?">${esc(col?.description || '')}</textarea>
-      </div>
     </div>
     <div class="modal-foot">
       <button class="btn-ghost" onclick="closeModal()">Cancel</button>
@@ -677,22 +779,15 @@ function openCollectionModal(colId = null) {
     </div>`);
 }
 
-function selectIcon(el) {
-  document.querySelectorAll('.icon-opt').forEach(e => e.classList.remove('selected'));
-  el.classList.add('selected');
-}
-
 function saveCollectionModal(colId) {
   const name = document.getElementById('col-name').value.trim();
   if (!name) { document.getElementById('col-name').focus(); return; }
-  const icon        = document.querySelector('.icon-opt.selected')?.dataset.icon || '📁';
-  const description = document.getElementById('col-desc').value.trim();
   const baseUrl     = document.getElementById('col-baseurl').value.trim();
 
   if (colId) {
-    col_update(colId, { name, icon, description, baseUrl });
+    col_update(colId, { name, baseUrl });
   } else {
-    col_create({ name, icon, description, baseUrl });
+    col_create({ name, baseUrl });
   }
   closeModal();
   render();
@@ -743,9 +838,14 @@ function openEntryModal(colId, entryId = null) {
         <span class="field-error hidden" id="entry-res-err"></span>
       </div>
       <div class="form-row">
-        <label>Request JSON <span style="color:var(--text-3)">(optional — what was sent)</span></label>
+        <label>Request JSON <span style="color:var(--text-3)">(optional - what was sent)</span></label>
         <textarea class="field json-field" id="entry-req-json" placeholder='{"filter": "active"}'>${entry?.requestJson ? JSON.stringify(entry.requestJson, null, 2) : ''}</textarea>
         <span class="field-error hidden" id="entry-req-err"></span>
+      </div>
+      <div class="form-row">
+        <label>Headers JSON <span style="color:var(--text-3)">(optional - request headers / auth)</span></label>
+        <textarea class="field json-field" id="entry-headers-json" placeholder='{"Authorization": "Bearer <token>", "x-api-key": "..."}'>${entry?.headers ? JSON.stringify(entry.headers, null, 2) : ''}</textarea>
+        <span class="field-error hidden" id="entry-head-err"></span>
       </div>
       <div class="form-row">
         <label>Notes <span style="color:var(--text-3)">(optional)</span></label>
@@ -764,10 +864,10 @@ function saveEntryModal(colId, entryId) {
   const name       = document.getElementById('entry-name').value.trim();
   const method     = document.getElementById('entry-method').value;
   const endpoint   = document.getElementById('entry-endpoint').value.trim();
-  const description= document.getElementById('entry-desc').value.trim();
   const tagsRaw    = document.getElementById('entry-tags').value.trim();
   const resRaw     = document.getElementById('entry-res-json').value.trim();
   const reqRaw     = document.getElementById('entry-req-json').value.trim();
+  const headRaw    = document.getElementById('entry-headers-json').value.trim();
   const notes      = document.getElementById('entry-notes').value.trim();
 
   let valid = true;
@@ -801,11 +901,28 @@ function saveEntryModal(colId, entryId) {
     }
   }
 
+  let headers = null;
+  if (headRaw) {
+    try {
+      headers = JSON.parse(headRaw);
+      if (headers === null || typeof headers !== 'object' || Array.isArray(headers)) {
+        throw new Error('Headers JSON must be an object');
+      }
+      document.getElementById('entry-head-err').classList.add('hidden');
+    } catch (e) {
+      document.getElementById('entry-head-err').textContent = 'Invalid JSON: ' + e.message;
+      document.getElementById('entry-head-err').classList.remove('hidden');
+      valid = false;
+    }
+  } else {
+    document.getElementById('entry-head-err').classList.add('hidden');
+  }
+
   if (!valid) return;
 
   const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
 
-  const payload = { name, method, endpoint, description, tags, responseJson, requestJson, notes };
+  const payload = { name, method, endpoint, description, tags, responseJson, requestJson, headers, notes };
 
   if (entryId) {
     entry_update(colId, entryId, payload);
@@ -1024,6 +1141,7 @@ function duplicateEntry(colId, entryId) {
     tags:         [...(src.tags    || [])],
     requestJson:  src.requestJson  ? JSON.parse(JSON.stringify(src.requestJson))  : null,
     responseJson: src.responseJson ? JSON.parse(JSON.stringify(src.responseJson)) : {},
+    headers:      src.headers      ? JSON.parse(JSON.stringify(src.headers))      : null,
     notes:        src.notes        || ''
   });
   render();
@@ -1131,3 +1249,8 @@ function downloadFile(filename, content) {
 function slugify(str) {
   return str.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'collection';
 }
+
+
+
+
+
