@@ -248,8 +248,7 @@ function buildEntryView(colId, entryId, entry) {
     hostLabel = baseUrl;
     pathLabel = endpoint || (baseUrl ? '/' : '');
   }
-  const hostBadge = hostLabel ? hostLabel.replace(/^https?:\/\//, '') : '';
-  const hasHost = Boolean(hostBadge);
+  const hostBadge = hostLabel ? hostLabel.replace(/^https?:\/\//, '') : 'Not configured';
   const hasPath = Boolean(pathLabel);
 
   hdr.innerHTML = `
@@ -259,8 +258,8 @@ function buildEntryView(colId, entryId, entry) {
       <span class="ev-crumb-entry">${esc(entry.name)}</span>
     </div>
 
-    <div class="ev-url-row${hasHost ? '' : ' no-url'}">
-      ${hasHost ? `<div class="url-stack">
+    <div class="ev-url-row">
+      <div class="url-stack">
         <div class="url-host-row">
           <span class="url-host-label">HOST</span>
           <span class="url-host-chip">${esc(hostBadge)}</span>
@@ -275,7 +274,7 @@ function buildEntryView(colId, entryId, entry) {
               : `<span class="url-empty">no endpoint - click Edit to add one</span>`}
           </div>
         </div>
-      </div>` : ''}
+      </div>
     </div>
 
     <div class="ev-meta-row">

@@ -527,10 +527,6 @@ body {
   padding: 6px 16px 10px;
 }
 
-.ev-url-row.no-url {
-  display: none;
-}
-
 .url-stack {
   flex: 1;
   min-width: 0;
