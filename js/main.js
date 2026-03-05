@@ -9,6 +9,7 @@ const SIDEBAR_MIN_W = 220;
 const SIDEBAR_MAX_W = 640;
 
 document.addEventListener('DOMContentLoaded', () => {
+  initClientSettings();
   jv_load();
   initSidebarResizer();
   render();
@@ -20,6 +21,9 @@ function wireEvents() {
   // ── New Collection button ────────────────────────────────────
   document.getElementById('btn-new-col').addEventListener('click', () => {
     openCollectionModal();
+  });
+  document.getElementById('btn-settings').addEventListener('click', () => {
+    openSettingsModal();
   });
 
   // ── Search ───────────────────────────────────────────────────

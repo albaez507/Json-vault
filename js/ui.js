@@ -9,6 +9,13 @@ let _splitView   = true;        // side-by-side Request | Response (default)
 let _splitRightTab = 'response'; // 'response' | 'headers' | 'notes'
 let _jsonViewMode = 'response'; // 'hidden' | 'request' | 'response'
 let _projectMode = false;       // collection project details panel
+const THEME_KEY = 'jv-theme';
+const DIR_LABEL_KEY = 'jv-local-folder-label';
+const FS_DB_NAME = 'json-vault-fs';
+const FS_DB_STORE = 'handles';
+const FS_HANDLE_KEY = 'root-dir';
+let _settingsDbPromise = null;
+let _localRootDirHandle = null;
 
 // ── Master render ─────────────────────────────────────────────────
 
@@ -789,6 +796,389 @@ function applyExpandLevel(root, level) {
 function expandAllNodes(root) { applyExpandLevel(root, 99); }
 function collapseAllNodes(root) { applyExpandLevel(root, 0); }
 
+// Settings: theme + local disk sync
+function initClientSettings() {
+  let savedTheme = 'dark';
+  try { savedTheme = localStorage.getItem(THEME_KEY) || 'dark'; } catch (e) { /* ignore */ }
+  applyTheme(savedTheme === 'light' ? 'light' : 'dark', false);
+  restoreLocalFolderHandle();
+}
+
+function applyTheme(theme, persist = true) {
+  const safeTheme = theme === 'light' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', safeTheme);
+  if (persist) {
+    try { localStorage.setItem(THEME_KEY, safeTheme); } catch (e) { /* ignore */ }
+  }
+}
+
+function getCurrentTheme() {
+  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+}
+
+function openSettingsModal() {
+  const theme = getCurrentTheme();
+  const supportsFs = supportsFileSystemAccess();
+  const folderLabel = getLocalFolderLabel() || 'Not connected';
+  const hasEntry = Boolean(entry_getCurrent());
+  const hasCollection = Boolean(DATA.currentCollection && DATA.collections[DATA.currentCollection]);
+
+  openModal(`
+    <div class="modal-head">
+      <span class="modal-title">Settings</span>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <label>Theme</label>
+        <div class="settings-segment">
+          <button class="btn-depth settings-segment-btn${theme === 'dark' ? ' active' : ''}" id="theme-dark-btn">Dark</button>
+          <button class="btn-depth settings-segment-btn${theme === 'light' ? ' active' : ''}" id="theme-light-btn">Light</button>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label>Local Folder</label>
+        <div class="settings-block">
+          <div class="settings-folder-label">${esc(folderLabel)}</div>
+          <div class="settings-inline-actions">
+            <button class="btn-ghost-sm" id="btn-folder-choose">Choose Folder</button>
+            <button class="btn-ghost-sm" id="btn-folder-clear">Clear</button>
+          </div>
+          <div class="settings-note">
+            ${supportsFs
+              ? 'Folder access is available in this browser. Files will be saved under collection/entry folders.'
+              : 'Direct folder access is not available here. Save actions will use regular file downloads.'}
+          </div>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <label>Disk Sync</label>
+        <div class="settings-inline-actions">
+          <button class="btn-primary" id="btn-save-current-entry"${hasEntry ? '' : ' disabled'}>Save Current Entry</button>
+          <button class="btn-ghost" id="btn-save-current-collection"${hasCollection ? '' : ' disabled'}>Save Current Collection</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn-ghost" onclick="closeModal()">Close</button>
+    </div>`);
+
+  document.getElementById('theme-dark-btn')?.addEventListener('click', () => {
+    applyTheme('dark');
+    openSettingsModal();
+  });
+  document.getElementById('theme-light-btn')?.addEventListener('click', () => {
+    applyTheme('light');
+    openSettingsModal();
+  });
+  document.getElementById('btn-folder-choose')?.addEventListener('click', async () => {
+    const ok = await chooseLocalFolder();
+    if (ok) openSettingsModal();
+  });
+  document.getElementById('btn-folder-clear')?.addEventListener('click', async () => {
+    await clearLocalFolderHandle();
+    showToast('Local folder cleared', 'success');
+    openSettingsModal();
+  });
+  document.getElementById('btn-save-current-entry')?.addEventListener('click', async () => {
+    await saveCurrentEntryToDisk();
+  });
+  document.getElementById('btn-save-current-collection')?.addEventListener('click', async () => {
+    await saveCurrentCollectionToDisk();
+  });
+}
+
+function supportsFileSystemAccess() {
+  return typeof window.showDirectoryPicker === 'function';
+}
+
+function getLocalFolderLabel() {
+  if (_localRootDirHandle?.name) return _localRootDirHandle.name;
+  try {
+    return localStorage.getItem(DIR_LABEL_KEY) || '';
+  } catch (e) {
+    return '';
+  }
+}
+
+async function chooseLocalFolder() {
+  if (!supportsFileSystemAccess()) {
+    showToast('Folder picker is not available in this browser', 'error');
+    return false;
+  }
+  try {
+    const handle = await window.showDirectoryPicker({ mode: 'readwrite', id: 'json-vault-root' });
+    const granted = await ensureDirReadWritePermission(handle, true);
+    if (!granted) {
+      showToast('Folder permission denied', 'error');
+      return false;
+    }
+    _localRootDirHandle = handle;
+    try { localStorage.setItem(DIR_LABEL_KEY, handle.name || 'Selected Folder'); } catch (e) { /* ignore */ }
+    await idbSet(FS_HANDLE_KEY, handle);
+    showToast('Local folder connected', 'success');
+    return true;
+  } catch (e) {
+    if (e && e.name !== 'AbortError') {
+      showToast('Could not connect folder', 'error');
+    }
+    return false;
+  }
+}
+
+async function clearLocalFolderHandle() {
+  _localRootDirHandle = null;
+  try { localStorage.removeItem(DIR_LABEL_KEY); } catch (e) { /* ignore */ }
+  await idbDelete(FS_HANDLE_KEY);
+}
+
+async function restoreLocalFolderHandle() {
+  const handle = await idbGet(FS_HANDLE_KEY);
+  if (!handle) return;
+  _localRootDirHandle = handle;
+}
+
+async function getOrSelectWritableRootDir() {
+  if (!_localRootDirHandle) {
+    await restoreLocalFolderHandle();
+  }
+  if (!_localRootDirHandle && supportsFileSystemAccess()) {
+    const ok = await chooseLocalFolder();
+    if (!ok) return null;
+  }
+  if (_localRootDirHandle) {
+    const granted = await ensureDirReadWritePermission(_localRootDirHandle, true);
+    if (!granted) {
+      showToast('Folder permission is required to write files', 'error');
+      return null;
+    }
+    return _localRootDirHandle;
+  }
+  return null;
+}
+
+async function ensureDirReadWritePermission(handle, requestIfNeeded = false) {
+  if (!handle) return false;
+  if (typeof handle.queryPermission !== 'function') return true;
+  try {
+    const opts = { mode: 'readwrite' };
+    const status = await handle.queryPermission(opts);
+    if (status === 'granted') return true;
+    if (status === 'prompt' && requestIfNeeded && typeof handle.requestPermission === 'function') {
+      return (await handle.requestPermission(opts)) === 'granted';
+    }
+  } catch (e) {
+    return false;
+  }
+  return false;
+}
+
+async function saveCurrentEntryToDisk() {
+  const colId = DATA.currentCollection;
+  const entryId = DATA.currentEntry;
+  const col = DATA.collections[colId];
+  const entry = col?.entries?.[entryId];
+  if (!col || !entry) {
+    showToast('Select an entry first', 'error');
+    return;
+  }
+
+  if (!supportsFileSystemAccess()) {
+    downloadEntryAsFiles(col, entry);
+    showToast('Saved via browser downloads', 'success');
+    return;
+  }
+
+  const rootDir = await getOrSelectWritableRootDir();
+  if (!rootDir) return;
+
+  try {
+    const colDir = await rootDir.getDirectoryHandle(slugify(col.name), { create: true });
+    const entryDir = await colDir.getDirectoryHandle(slugify(entry.name), { create: true });
+    const files = buildEntryFiles(col, entry);
+    const existing = await getExistingFileNames(entryDir, files.map(f => f.name));
+    if (existing.length > 0) {
+      const ok = confirm(`Overwrite ${existing.length} existing file(s) for "${entry.name}"?`);
+      if (!ok) return;
+    }
+    await writeFiles(entryDir, files);
+    await writeProjectFile(colDir, col);
+    showToast('Entry saved to disk', 'success');
+  } catch (e) {
+    showToast('Failed to save entry to disk', 'error');
+  }
+}
+
+async function saveCurrentCollectionToDisk() {
+  const colId = DATA.currentCollection;
+  const col = DATA.collections[colId];
+  if (!col) {
+    showToast('Select a collection first', 'error');
+    return;
+  }
+
+  if (!supportsFileSystemAccess()) {
+    downloadFile(`${slugify(col.name)}-collection.json`, JSON.stringify(col, null, 2));
+    showToast('Collection downloaded', 'success');
+    return;
+  }
+
+  const rootDir = await getOrSelectWritableRootDir();
+  if (!rootDir) return;
+
+  try {
+    const colDir = await rootDir.getDirectoryHandle(slugify(col.name), { create: true });
+    await writeProjectFile(colDir, col);
+
+    const order = col.entryOrder || Object.keys(col.entries || {});
+    for (const entryId of order) {
+      const entry = col.entries[entryId];
+      if (!entry) continue;
+      const entryDir = await colDir.getDirectoryHandle(slugify(entry.name), { create: true });
+      await writeFiles(entryDir, buildEntryFiles(col, entry));
+    }
+    showToast('Collection saved to disk', 'success');
+  } catch (e) {
+    showToast('Failed to save collection to disk', 'error');
+  }
+}
+
+function buildProjectData(col) {
+  return {
+    name: col.name || '',
+    baseUrl: col.baseUrl || '',
+    shortDescription: col.shortDescription || '',
+    credentials: col.credentials || '',
+    exportedAt: new Date().toISOString()
+  };
+}
+
+function buildEntryFiles(col, entry) {
+  const files = [];
+  files.push({
+    name: 'entry-meta.json',
+    content: JSON.stringify({
+      name: entry.name || '',
+      method: entry.method || 'GET',
+      endpoint: entry.endpoint || '',
+      description: entry.description || '',
+      tags: entry.tags || [],
+      updatedAt: entry.updatedAt || Date.now()
+    }, null, 2)
+  });
+  files.push({ name: 'response.json', content: JSON.stringify(entry.responseJson || {}, null, 2) });
+  if (entry.requestJson !== null && entry.requestJson !== undefined) {
+    files.push({ name: 'request.json', content: JSON.stringify(entry.requestJson, null, 2) });
+  }
+  if (entry.headers && typeof entry.headers === 'object') {
+    files.push({ name: 'headers.json', content: JSON.stringify(entry.headers, null, 2) });
+  }
+  if (entry.notes) {
+    files.push({ name: 'notes.txt', content: entry.notes, type: 'text/plain' });
+  }
+  files.push({ name: 'project.json', content: JSON.stringify(buildProjectData(col), null, 2) });
+  return files;
+}
+
+function downloadEntryAsFiles(col, entry) {
+  const base = `${slugify(col.name)}-${slugify(entry.name)}`;
+  const files = buildEntryFiles(col, entry);
+  for (const file of files) {
+    downloadFile(`${base}-${file.name}`, file.content, file.type || 'application/json');
+  }
+}
+
+async function writeProjectFile(colDir, col) {
+  await writeFiles(colDir, [{
+    name: 'project.json',
+    content: JSON.stringify(buildProjectData(col), null, 2)
+  }]);
+}
+
+async function getExistingFileNames(dirHandle, names) {
+  const existing = [];
+  for (const name of names) {
+    try {
+      await dirHandle.getFileHandle(name, { create: false });
+      existing.push(name);
+    } catch (e) {
+      if (!e || e.name !== 'NotFoundError') throw e;
+    }
+  }
+  return existing;
+}
+
+async function writeFiles(dirHandle, files) {
+  for (const file of files) {
+    const fileHandle = await dirHandle.getFileHandle(file.name, { create: true });
+    const writable = await fileHandle.createWritable();
+    await writable.write(file.content);
+    await writable.close();
+  }
+}
+
+function openSettingsDb() {
+  if (_settingsDbPromise) return _settingsDbPromise;
+  _settingsDbPromise = new Promise(resolve => {
+    if (!window.indexedDB) { resolve(null); return; }
+    let req;
+    try {
+      req = indexedDB.open(FS_DB_NAME, 1);
+    } catch (e) {
+      resolve(null);
+      return;
+    }
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(FS_DB_STORE)) {
+        db.createObjectStore(FS_DB_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => resolve(null);
+  });
+  return _settingsDbPromise;
+}
+
+async function idbGet(key) {
+  const db = await openSettingsDb();
+  if (!db) return null;
+  return new Promise(resolve => {
+    const tx = db.transaction(FS_DB_STORE, 'readonly');
+    const req = tx.objectStore(FS_DB_STORE).get(key);
+    req.onsuccess = () => resolve(req.result || null);
+    req.onerror = () => resolve(null);
+  });
+}
+
+async function idbSet(key, value) {
+  const db = await openSettingsDb();
+  if (!db) return false;
+  return new Promise(resolve => {
+    const tx = db.transaction(FS_DB_STORE, 'readwrite');
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => resolve(false);
+    try {
+      tx.objectStore(FS_DB_STORE).put(value, key);
+    } catch (e) {
+      resolve(false);
+    }
+  });
+}
+
+async function idbDelete(key) {
+  const db = await openSettingsDb();
+  if (!db) return false;
+  return new Promise(resolve => {
+    const tx = db.transaction(FS_DB_STORE, 'readwrite');
+    tx.oncomplete = () => resolve(true);
+    tx.onerror = () => resolve(false);
+    tx.objectStore(FS_DB_STORE).delete(key);
+  });
+}
+
 // ── Modals ────────────────────────────────────────────────────────
 
 function openModal(content, wide = false) {
@@ -1329,9 +1719,9 @@ function fallbackCopy(str) {
   ta.remove();
 }
 
-function downloadFile(filename, content) {
+function downloadFile(filename, content, mime = 'application/json') {
   const a = document.createElement('a');
-  a.href = URL.createObjectURL(new Blob([content], { type: 'application/json' }));
+  a.href = URL.createObjectURL(new Blob([content], { type: mime }));
   a.download = filename;
   a.click();
   URL.revokeObjectURL(a.href);
